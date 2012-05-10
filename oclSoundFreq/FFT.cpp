@@ -60,7 +60,7 @@ std::vector<FFT::Complex> FFT::transform(const vector<Complex>& buf)
 
     int m = 1;
 
-    start_t = getcputime();;
+    start_t = getcputime();
     for (int s = 0; s < lgN; ++s)
     {
         m <<= 1;
@@ -78,11 +78,11 @@ std::vector<FFT::Complex> FFT::transform(const vector<Complex>& buf)
                 current_omega *= omega[s];
             }
         }
-//        for(int i = 0; i < n; i++)
-//        {
-//          cout << "Index " << i << ": (after) (s:" << s << ") " << real(result[i]) << " " << imag(result[i]) << endl;
-//        }
-//        cout << endl;
+        for(int i = 0; i < n; i++)
+        {
+          cout << "Index " << i << ": (after) (s:" << s << ") " << real(result[i]) << " " << imag(result[i]) << endl;
+        }
+        cout << endl;
 
     }
 
@@ -105,47 +105,52 @@ std::vector<FFT::Complex> FFT::transform(const vector<Complex>& buf)
     return result;
 }
 
-void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debug_buf, cl_mem cmDev, cl_mem cmDebug, cl_mem cmInv, cl_kernel ckKernel, size_t szGlobalWorkSize, 
+void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debug_buf, cl_mem cmDev, 
+                       cl_mem cmPointsPerGroup, cl_mem cmDebug, cl_mem cmDir, cl_kernel ckKernel, size_t szGlobalWorkSize, size_t szLocalWorkSize, unsigned int points_per_group,
                        cl_command_queue cqCommandQueue, cl_int ciErr, int argc, const char **argv)
 {
-  size_t szLocalWorkSize;
-  int inv_i = (inverse) ? 1 : 0;
-  void * inv = (void *)&inv_i;
+  int dir_i = (inverse) ? -1 : 1;
+  void * dir = (void *)&dir_i;
+  void * pts_per_grp_p = (void *)&points_per_group;
   bitReverseCopy(buf, result);
-  cl_double2 * cl_double2_buf = (cl_double2 *)cl_buf;
-  cl_double2 * cl_int_debug_buf = (cl_double2 *)cl_debug_buf;
+  cl_float2 * cl_float2_buf = (cl_float2 *)cl_buf;
+  cl_float2 * cl_float2_debug_buf = (cl_float2 *)cl_debug_buf;
   for(int i = 0; i < n; i++)
   {
-    cl_double2_buf[i].x = (float)real(result[i]);
-    cl_double2_buf[i].y = (float)imag(result[i]);
-    cl_int_debug_buf[i].x = -1.0;
-    cl_int_debug_buf[i].y = -1.0;
+    cl_float2_buf[i].x = (float)real(result[i]);
+    cl_float2_buf[i].y = (float)imag(result[i]);
+    cl_float2_debug_buf[i].x = -1.0;
+    cl_float2_debug_buf[i].y = -1.0;
   }
 
   for(int i = 0; i < n; i++)
   {
-    cout << "Index " << i << ": (before) " << cl_double2_buf[i].x << " " << cl_double2_buf[i].y << endl;
+    cout << "Index " << i << ": (before) " << cl_float2_buf[i].x << " " << cl_float2_buf[i].y << endl;
   }
   cout << endl;
 
-  int m = 1;
-
-  ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDev, CL_FALSE, 0, sizeof(cl_double2) * n, cl_buf, 0, NULL, NULL);
+  ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDev, CL_FALSE, 0, sizeof(cl_float2) * n, cl_buf, 0, NULL, NULL);
   if (ciErr != CL_SUCCESS)
   {
     shrLog("Error in clEnqueueWriteBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
     Cleanup(argc, (char **)argv, EXIT_FAILURE);
   }
 
-  
-  ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDebug, CL_FALSE, 0, sizeof(cl_double2) * n, cl_debug_buf, 0, NULL, NULL);
+  ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmPointsPerGroup, CL_FALSE, 0, sizeof(cl_uint), pts_per_grp_p, 0, NULL, NULL);
   if (ciErr != CL_SUCCESS)
   {
     shrLog("Error in clEnqueueWriteBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
     Cleanup(argc, (char **)argv, EXIT_FAILURE);
   }
 
-  ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmInv, CL_FALSE, 0, sizeof(cl_int), inv, 0, NULL, NULL);
+  ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDebug, CL_FALSE, 0, sizeof(cl_float2) * n, cl_debug_buf, 0, NULL, NULL);
+  if (ciErr != CL_SUCCESS)
+  {
+    shrLog("Error in clEnqueueWriteBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+    Cleanup(argc, (char **)argv, EXIT_FAILURE);
+  }
+
+  ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDir, CL_FALSE, 0, sizeof(cl_int), dir, 0, NULL, NULL);
   if (ciErr != CL_SUCCESS)
   {
     shrLog("Error in clEnqueueWriteBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -154,37 +159,18 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
 
 
 
-  for(int s = 0; s < lgN; ++s)
-  {
-    m <<= 1;
-    szLocalWorkSize = m >> 1;
+//  for(int s = 0; s < lgN; ++s)
+//  {
+//    m <<= 1;
+//    szLocalWorkSize = m >> 1;
 
-//    cout << "Enqueue with Global Work Size " << szGlobalWorkSize << " and Local Work Size " << szLocalWorkSize << endl;
-    if(s == 0)
-    {
+    cout << "Enqueue with Global Work Size " << szGlobalWorkSize << " and Local Work Size " << szLocalWorkSize << endl;
+//    if(s == 0)
+//    {
       // Launch kernel
-      ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, &start_event);
-      if (ciErr != CL_SUCCESS)
-      {
-        shrLog("Error in clEnqueueNDRangeKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
-        shrLog("Error is %s\n", oclErrorString(ciErr));
-        Cleanup(argc, (char **)argv, EXIT_FAILURE);
-      }
-    }
-    else if(s == (lgN-1))
-    {
-      // Launch kernel
-      ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, &end_event);
-      if (ciErr != CL_SUCCESS)
-      {
-        shrLog("Error in clEnqueueNDRangeKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
-        shrLog("Error is %s\n", oclErrorString(ciErr));
-        Cleanup(argc, (char **)argv, EXIT_FAILURE);
-      }
-    }
-    else
-    {
-       // Launch kernel
+//      ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, &start_event);
+    start_t = getcputime();
+
       ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, NULL);
       if (ciErr != CL_SUCCESS)
       {
@@ -192,16 +178,44 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
         shrLog("Error is %s\n", oclErrorString(ciErr));
         Cleanup(argc, (char **)argv, EXIT_FAILURE);
       }
-    }
+//    }
+//    else if(s == (lgN-1))
+//    {
+      // Launch kernel
+//      ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, &end_event);
+//      if (ciErr != CL_SUCCESS)
+//      {
+//        shrLog("Error in clEnqueueNDRangeKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+//        shrLog("Error is %s\n", oclErrorString(ciErr));
+//        Cleanup(argc, (char **)argv, EXIT_FAILURE);
+//      }
+//    }
+//    else
+//    {
+       // Launch kernel
+//      ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, NULL);
+//      if (ciErr != CL_SUCCESS)
+//      {
+//        shrLog("Error in clEnqueueNDRangeKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+//        shrLog("Error is %s\n", oclErrorString(ciErr));
+//        Cleanup(argc, (char **)argv, EXIT_FAILURE);
+//      }
+//    }
 
     clFinish(cqCommandQueue);
 
-//    ciErr = clEnqueueReadBuffer(cqCommandQueue, cmDebug, CL_TRUE, 0, sizeof(cl_float2) * n, cl_debug_buf, 0, NULL, NULL);
-//    if (ciErr != CL_SUCCESS)
-//    {
-//      shrLog("Error in clEnqueueReadBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
-//     Cleanup(argc, (char **)argv, EXIT_FAILURE);
-//    } 
+    end_t = getcputime();
+    clock_diff = end_t - start_t;
+    shrLog("CPU transform start microseconds\t %5.2f \n", start_t);
+    shrLog("CPU transform end microseconds\t %5.2f \n", end_t);
+    shrLog("CPU transform diff microseconds\t %5.2f \n", clock_diff);
+
+    ciErr = clEnqueueReadBuffer(cqCommandQueue, cmDebug, CL_TRUE, 0, sizeof(cl_float2) * n, cl_debug_buf, 0, NULL, NULL);
+    if (ciErr != CL_SUCCESS)
+    {
+      shrLog("Error in clEnqueueReadBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+     Cleanup(argc, (char **)argv, EXIT_FAILURE);
+    } 
 
 //    ciErr = clEnqueueReadBuffer(cqCommandQueue, cmDev, CL_TRUE, 0, sizeof(cl_float2) * n, cl_buf, 0, NULL, NULL);
 //    if (ciErr != CL_SUCCESS)
@@ -210,25 +224,25 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
 //     Cleanup(argc, (char **)argv, EXIT_FAILURE);
 //    } 
 
-//    for(int i = 0; i < n; i++)
-//    {
-//      cout << "Index " << i << ": (after) (s:" << s << ") " << cl_float2_buf[i].x << " " << cl_float2_buf[i].y << " with omega = (" << cl_int_debug_buf[i].x << "," << 
-//                     														       cl_int_debug_buf[i].y << ")" << endl;
-//      cl_int_debug_buf[i].x = -1;
-//      cl_int_debug_buf[i].y = -1;
-//    }
-//    cout << endl;
+    for(int i = 0; i < n; i++)
+    {
+      cout << "Index " << i << " (" << cl_float2_debug_buf[i].x << "," << 
+                     		       cl_float2_debug_buf[i].y << ")" << endl;
+      cl_float2_debug_buf[i].x = -1;
+      cl_float2_debug_buf[i].y = -1;
+    }
+    cout << endl;
 
-  }
+//  }
 
-  clGetEventProfilingInfo(start_event, CL_PROFILING_COMMAND_START,
-         sizeof(start_time), &start_time, NULL);
-  clGetEventProfilingInfo(end_event, CL_PROFILING_COMMAND_END,
-         sizeof(end_time), &end_time, NULL);
-  total_time = (double)(end_time - start_time) / 1e3; // convert from nanoseconds to microseconds
-  shrLog("GPU transform time\t %5.2f microseconds \n", total_time);
+//  clGetEventProfilingInfo(start_event, CL_PROFILING_COMMAND_START,
+//         sizeof(start_time), &start_time, NULL);
+//  clGetEventProfilingInfo(end_event, CL_PROFILING_COMMAND_END,
+//         sizeof(end_time), &end_time, NULL);
+//  total_time = (double)(end_time - start_time) / 1e3; // convert from nanoseconds to microseconds
+//  shrLog("GPU transform time\t %5.2f microseconds \n", total_time);
 
-  ciErr = clEnqueueReadBuffer(cqCommandQueue, cmDev, CL_TRUE, 0, sizeof(cl_double2) * n, cl_buf, 0, NULL, NULL);
+  ciErr = clEnqueueReadBuffer(cqCommandQueue, cmDev, CL_TRUE, 0, sizeof(cl_float2) * n, cl_buf, 0, NULL, NULL);
   if (ciErr != CL_SUCCESS)
   {
     shrLog("Error in clEnqueueReadBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -239,27 +253,27 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
   {
     for(int i = 0; i < n; ++i)
     {
-      cl_double2_buf[i].x = cl_double2_buf[i].x / n;
-      cl_double2_buf[i].y = cl_double2_buf[i].y / n;
+      cl_float2_buf[i].x = cl_float2_buf[i].x / n;
+      cl_float2_buf[i].y = cl_float2_buf[i].y / n;
     }
   }
 
   for(int i = 0; i < n; i++)
   {
-    cout << "Index " << i << ": (after) " << cl_double2_buf[i].x << " " << cl_double2_buf[i].y << endl;
+    cout << "Index " << i << ": (after) " << cl_float2_buf[i].x << " " << cl_float2_buf[i].y << endl;
   }
   cout << endl;
 
-  clReleaseEvent(start_event);
-  clReleaseEvent(end_event);
+//  clReleaseEvent(start_event);
+//  clReleaseEvent(end_event);
 }
 
-double FFT::getIntensity(Complex c)
+float FFT::getIntensity(Complex c)
 {
     return abs(c);
 }
 
-double FFT::getPhase(Complex c)
+float FFT::getPhase(Complex c)
 {
     return arg(c);
 }

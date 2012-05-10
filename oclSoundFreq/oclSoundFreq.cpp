@@ -12,14 +12,17 @@
 
 using namespace std;
 
-const int samples_per_second = 8192;
+const int samples_per_second = 2048;
 
 void opencl_init(int n, int argc, const char **argv);
 void compareValues(vector<FFT::Complex> cpu_transform_values, void * gpu_transform_values, int n);
 
-const char* cSourceFile = "FFT.cl";
+const char* cSourceFile = "FFT2.cl";
 
 void * cl_complex,* cl_debug;
+cl_ulong local_memory_size;
+unsigned int points_per_group;
+unsigned int points_per_item;
 
 cl_context cxGPUContext;
 cl_command_queue cqCommandQueue;
@@ -28,16 +31,19 @@ cl_device_id cdDevice;
 cl_program cpProgram;
 cl_kernel ckKernel;
 cl_mem cmDevComplex;
-cl_mem cmDevPolyMultB;
-cl_mem cmDevPolyMultC;
+cl_mem cmPointsPerGroup;
 cl_mem cmDevDebug;
-cl_mem cmInv;
+cl_mem cmDir;
+size_t num_points;
+size_t items_per_group;
 size_t szGlobalWorkSize;
+size_t szLocalWorkSize;
 size_t szKernelLength;
+size_t log_size;
 cl_int ciErr1;
 char* cPathAndName = NULL;
 char* cSourceCL = NULL;
-
+char* program_log;
 
 int main(int argc, const char **argv)
 { 
@@ -58,18 +64,39 @@ int main(int argc, const char **argv)
   FFT dft(n);
   vector<FFT::Complex> frequencies = dft.transform(buf_complex);
 
+  ciErr1 = clGetKernelWorkGroupInfo(ckKernel, cdDevice, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), (void *)&items_per_group, NULL);
+  ciErr1 |= clGetDeviceInfo(cdDevice, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(cl_ulong), &local_memory_size, NULL);
+
+  size_t l_mem_size = (sizeof(cl_float2) * n) > (local_memory_size/2) ? (local_memory_size/2) : (sizeof(cl_float2) * n);
+
   // Set the Argument values
   ciErr1 = clSetKernelArg(ckKernel, 0, sizeof(cl_mem), (void*)&cmDevComplex);
-  ciErr1 |= clSetKernelArg(ckKernel, 1, sizeof(cl_mem), (void*)&cmDevDebug);
-  ciErr1 |= clSetKernelArg(ckKernel, 2, sizeof(cl_mem), (void*)&cmInv);
-  shrLog("clSetKernelArg 0...2\n\n");
+  ciErr1 |= clSetKernelArg(ckKernel, 1,l_mem_size , NULL);
+  ciErr1 |= clSetKernelArg(ckKernel, 2, sizeof(cl_mem), (void*)&cmPointsPerGroup);
+  ciErr1 |= clSetKernelArg(ckKernel, 3, sizeof(cl_mem), (void*)&cmDevDebug);
+  ciErr1 |= clSetKernelArg(ckKernel, 4, sizeof(cl_mem), (void*)&cmDir);
+  shrLog("clSetKernelArg 0...4\n\n");
   if (ciErr1 != CL_SUCCESS)
   {
     shrLog("Error in clSetKernelArg, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
     Cleanup(argc, (char **)argv, EXIT_FAILURE);
   }
  
-  dft.transformGPU(buf_complex, cl_complex, cl_debug, cmDevComplex, cmDevDebug, cmInv, ckKernel, szGlobalWorkSize, cqCommandQueue, ciErr1, argc, (const char **)argv);
+  points_per_group = local_memory_size/(2*(2*sizeof(float)));
+  points_per_item = (points_per_group/(items_per_group/2));
+
+  szLocalWorkSize = (num_points/points_per_item) > (items_per_group/2) ? (items_per_group/2) : (num_points/points_per_item);
+  szGlobalWorkSize = num_points/points_per_item;
+//  points_per_group = num_points;
+
+//  szLocalWorkSize = szLocalWorkSize * 2;
+//  szGlobalWorkSize = szGlobalWorkSize * 2;
+
+  cout << "Points per group: " << points_per_group << " local memory size: " << l_mem_size << endl;
+
+  dft.transformGPU(buf_complex, cl_complex, cl_debug, cmDevComplex, 
+                   cmPointsPerGroup, cmDevDebug, cmDir, ckKernel, szGlobalWorkSize, szLocalWorkSize, points_per_group,
+                   cqCommandQueue, ciErr1, argc, (const char **)argv);
   compareValues(frequencies, cl_complex, n);
  
   for (int k = 0; k < (n >> 1); ++k)
@@ -83,13 +110,13 @@ void opencl_init(int n, int argc, const char **argv)
     shrQAStart(argc, (char **)argv);
     // set logfile name and start logs
     shrSetLogFileName("oclFFT.txt");
-    szGlobalWorkSize = n/2;
+    num_points = n;
     shrLog("%s Starting...\n\n# of elements per Array \t= %i\n", argv[0], n);
     
     shrLog("Initializing data...\n");
-    cl_complex = (void *)malloc(sizeof(cl_double2) * n);
+    cl_complex = (void *)malloc(sizeof(cl_float2) * n);
 
-    cl_debug = (void *)malloc(sizeof(cl_double2) * n);
+    cl_debug = (void *)malloc(sizeof(cl_float2) * n);
 
     //Get an OpenCL platform
     ciErr1 = clGetPlatformIDs(1, &cpPlatform, NULL);
@@ -129,7 +156,7 @@ void opencl_init(int n, int argc, const char **argv)
     }   
 
     // Allocate the OpenCL buffer memory objects for source and result on the device GMEM
-    cmDevComplex = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_double2) * n, NULL, &ciErr1);
+    cmDevComplex = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_float2) * n, NULL, &ciErr1);
 
     shrLog("clCreateBuffer...\n");
     if (ciErr1 != CL_SUCCESS)
@@ -138,7 +165,7 @@ void opencl_init(int n, int argc, const char **argv)
         Cleanup(argc, (char **)argv, EXIT_FAILURE);
     } 
 
-    cmDevDebug = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_double2) * n, NULL, &ciErr1);
+    cmPointsPerGroup = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_uint), NULL, &ciErr1);
 
     shrLog("clCreateBuffer...\n");
     if (ciErr1 != CL_SUCCESS)
@@ -147,7 +174,17 @@ void opencl_init(int n, int argc, const char **argv)
         Cleanup(argc, (char **)argv, EXIT_FAILURE);
     } 
 
-    cmInv = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_int), NULL, &ciErr1);
+
+    cmDevDebug = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_float2) * n, NULL, &ciErr1);
+
+    shrLog("clCreateBuffer...\n");
+    if (ciErr1 != CL_SUCCESS)
+    {
+        shrLog("Error in clCreateBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+        Cleanup(argc, (char **)argv, EXIT_FAILURE);
+    } 
+
+    cmDir = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_int), NULL, &ciErr1);
 
     shrLog("clCreateBuffer...\n");
     if (ciErr1 != CL_SUCCESS)
@@ -181,30 +218,30 @@ void opencl_init(int n, int argc, const char **argv)
     shrLog("clBuildProgram...\n");
     if (ciErr1 != CL_SUCCESS)
     {
+      clGetProgramBuildInfo(cpProgram, cdDevice, CL_PROGRAM_BUILD_LOG,
+        0, NULL, &log_size);
+      program_log = (char *)malloc(log_size + 1);
+      program_log[log_size] = '\0';
+      clGetProgramBuildInfo(cpProgram, cdDevice, CL_PROGRAM_BUILD_LOG,
+                log_size + 1, program_log, NULL);
+      printf("%s\n", program_log);
+      free(program_log);
       shrLog("Error in clBuildProgram, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
       Cleanup(argc, (char **)argv, EXIT_FAILURE);
     }
     // Create the kernel
-    ckKernel = clCreateKernel(cpProgram, "FFT", &ciErr1);
-    shrLog("clCreateKernel (FFT)...\n");
+    ckKernel = clCreateKernel(cpProgram, "FFT2", &ciErr1);
+    shrLog("clCreateKernel (FFT2)...\n");
     if (ciErr1 != CL_SUCCESS)
     {   
       shrLog("Error in clCreateKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
       Cleanup(argc, (char **)argv, EXIT_FAILURE);
     }
-
-    size_t max_work_group_size;
-    cl_ulong local_memory_size;
-    ciErr1 = clGetKernelWorkGroupInfo(ckKernel, cdDevice, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), (void *)&max_work_group_size, NULL);
-    ciErr1 |= clGetDeviceInfo(cdDevice, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(cl_ulong), (void *)&local_memory_size, NULL);
-
-    cout << "Max work group size: " << max_work_group_size << " Local memory size : " << local_memory_size << endl;
-    
 }
 
 void compareValues(vector<FFT::Complex> cpu_transform_values, void * gpu_transform_values, int n)
 {
-  cl_double2 * gpu_transform_values_fl = (cl_double2 *)gpu_transform_values;
+  cl_float2 * gpu_transform_values_fl = (cl_float2 *)gpu_transform_values;
   int OK = 1;
   for(int i = 0; i < n; i++)
   {

@@ -116,8 +116,6 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
   }
   cout << endl;
 
-  int m = 1;
-
   ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDev, CL_FALSE, 0, sizeof(cl_float2) * n, cl_buf, 0, NULL, NULL);
   if (ciErr != CL_SUCCESS)
   {
