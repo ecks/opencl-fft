@@ -52,11 +52,11 @@ std::vector<FFT::Complex> FFT::transform(const vector<Complex>& buf)
 {
     bitReverseCopy(buf, result);
 
-    for(int i = 0; i < n; i++)
-    {
-      cout << "Index " << i << ": (before) " << real(result[i]) << " " << imag(result[i]) << endl;
-    }
-    cout << endl;
+//    for(int i = 0; i < n; i++)
+//    {
+//      cout << "Index " << i << ": (before) " << real(result[i]) << " " << imag(result[i]) << endl;
+//    }
+//    cout << endl;
 
     int m = 1;
 
@@ -78,11 +78,11 @@ std::vector<FFT::Complex> FFT::transform(const vector<Complex>& buf)
                 current_omega *= omega[s];
             }
         }
-        for(int i = 0; i < n; i++)
-        {
-          cout << "Index " << i << ": (after) (s:" << s << ") " << real(result[i]) << " " << imag(result[i]) << endl;
-        }
-        cout << endl;
+//        for(int i = 0; i < n; i++)
+//        {
+//          cout << "Index " << i << ": (after) (s:" << s << ") " << real(result[i]) << " " << imag(result[i]) << endl;
+//        }
+//        cout << endl;
 
     }
 
@@ -93,14 +93,15 @@ std::vector<FFT::Complex> FFT::transform(const vector<Complex>& buf)
     shrLog("CPU transform diff microseconds\t %5.2f \n", clock_diff);
 
     
+//    for(int i = 0; i < n; i++)
+//    {
+//      cout << "Index " << i << ": (after) " << real(result[i]) << " " << imag(result[i]) << endl;
+//    }
+//    cout << endl;
+
     if (inverse == false)
         for (int i = 0; i < n; ++i)
             result[i] /= n;
-    for(int i = 0; i < n; i++)
-    {
-      cout << "Index " << i << ": (after) " << real(result[i]) << " " << imag(result[i]) << endl;
-    }
-    cout << endl;
 
     return result;
 }
@@ -123,11 +124,11 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
     cl_float2_debug_buf[i].y = -1.0;
   }
 
-  for(int i = 0; i < n; i++)
-  {
-    cout << "Index " << i << ": (before) " << cl_float2_buf[i].x << " " << cl_float2_buf[i].y << endl;
-  }
-  cout << endl;
+//  for(int i = 0; i < n; i++)
+//  {
+//    cout << "Index " << i << ": (before) " << cl_float2_buf[i].x << " " << cl_float2_buf[i].y << endl;
+//  }
+//  cout << endl;
 
   ciErr = clEnqueueWriteBuffer(cqCommandQueue, cmDev, CL_FALSE, 0, sizeof(cl_float2) * n, cl_buf, 0, NULL, NULL);
   if (ciErr != CL_SUCCESS)
@@ -164,20 +165,20 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
 //    m <<= 1;
 //    szLocalWorkSize = m >> 1;
 
-    cout << "Enqueue with Global Work Size " << szGlobalWorkSize << " and Local Work Size " << szLocalWorkSize << endl;
+//    cout << "Enqueue with Global Work Size " << szGlobalWorkSize << " and Local Work Size " << szLocalWorkSize << endl;
 //    if(s == 0)
 //    {
       // Launch kernel
 //      ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, &start_event);
     start_t = getcputime();
 
-      ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, NULL);
-      if (ciErr != CL_SUCCESS)
-      {
-        shrLog("Error in clEnqueueNDRangeKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
-        shrLog("Error is %s\n", oclErrorString(ciErr));
-        Cleanup(argc, (char **)argv, EXIT_FAILURE);
-      }
+    ciErr = clEnqueueNDRangeKernel(cqCommandQueue, ckKernel, 1, NULL, &szGlobalWorkSize, &szLocalWorkSize, 0, NULL, NULL);
+    if (ciErr != CL_SUCCESS)
+    {
+      shrLog("Error in clEnqueueNDRangeKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+      shrLog("Error is %s\n", oclErrorString(ciErr));
+      Cleanup(argc, (char **)argv, EXIT_FAILURE);
+    }
 //    }
 //    else if(s == (lgN-1))
 //    {
@@ -204,6 +205,43 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
 
     clFinish(cqCommandQueue);
 
+    ciErr = clEnqueueReadBuffer(cqCommandQueue, cmDev, CL_TRUE, 0, sizeof(cl_float2) * n, cl_buf, 0, NULL, NULL);
+    if (ciErr != CL_SUCCESS)
+    {
+      shrLog("Error in clEnqueueReadBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+      Cleanup(argc, (char **)argv, EXIT_FAILURE);
+    } 
+
+    // one more iteration to combine all the elements together
+    if(n > points_per_group)
+    {
+      int m = points_per_group;
+      for(int s = log2(points_per_group); s < lgN; ++s)
+      {
+        m <<= 1;
+//        cout << "Performing CPU calculation with s: " << s << " and m: " << m << endl;
+        for(int k = 0; k < n; k+= m)
+        {
+          cl_float2 current_omega;
+          current_omega.s0 = 1.0;
+          current_omega.s1 = 0.0;
+          for (int j = 0; j < (m >> 1); ++j)
+          {
+            cl_float2 t; 
+            t.s0 = current_omega.s0 * cl_float2_buf[k + j + (m >> 1)].s0 - current_omega.s1 * cl_float2_buf[k + j + (m >> 1)].s1;
+            t.s1 = current_omega.s0 * cl_float2_buf[k + j + (m >> 1)].s1 + current_omega.s1 * cl_float2_buf[k + j + (m >> 1)].s0;
+            cl_float2 u = cl_float2_buf[k + j];
+            cl_float2_buf[k + j].s0 = u.s0 + t.s0;
+            cl_float2_buf[k + j].s1 = u.s1 + t.s1;
+            cl_float2_buf[k + j + (m >> 1)].s0 = u.s0 - t.s0;
+            cl_float2_buf[k + j + (m >> 1)].s1 = u.s1 - t.s1;
+            current_omega.s0 = current_omega.s0 * real(omega[s]) - current_omega.s1 * imag(omega[s]) ;
+            current_omega.s1 = current_omega.s0 * imag(omega[s]) + current_omega.s1 * real(omega[s]) ;
+          }
+        }
+      }
+    }
+
     end_t = getcputime();
     clock_diff = end_t - start_t;
     shrLog("CPU transform start microseconds\t %5.2f \n", start_t);
@@ -226,12 +264,11 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
 
     for(int i = 0; i < n; i++)
     {
-      cout << "Index " << i << " (" << cl_float2_debug_buf[i].x << "," << 
-                     		       cl_float2_debug_buf[i].y << ")" << endl;
+//      cout << "Index " << i << " (" << cl_float2_debug_buf[i].x << "," << 
+//                     		       cl_float2_debug_buf[i].y << ")" << endl;
       cl_float2_debug_buf[i].x = -1;
       cl_float2_debug_buf[i].y = -1;
     }
-    cout << endl;
 
 //  }
 
@@ -242,27 +279,27 @@ void FFT::transformGPU(const vector<Complex>& buf, void * cl_buf, void * cl_debu
 //  total_time = (double)(end_time - start_time) / 1e3; // convert from nanoseconds to microseconds
 //  shrLog("GPU transform time\t %5.2f microseconds \n", total_time);
 
-  ciErr = clEnqueueReadBuffer(cqCommandQueue, cmDev, CL_TRUE, 0, sizeof(cl_float2) * n, cl_buf, 0, NULL, NULL);
-  if (ciErr != CL_SUCCESS)
-  {
-    shrLog("Error in clEnqueueReadBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
-    Cleanup(argc, (char **)argv, EXIT_FAILURE);
-  } 
+//  ciErr = clEnqueueReadBuffer(cqCommandQueue, cmDev, CL_TRUE, 0, sizeof(cl_float2) * n, cl_buf, 0, NULL, NULL);
+//  if (ciErr != CL_SUCCESS)
+//  {
+//    shrLog("Error in clEnqueueReadBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+//    Cleanup(argc, (char **)argv, EXIT_FAILURE);
+//  } 
+
+//  for(int i = 0; i < n; i++)
+//  {
+//    cout << "Index " << i << ": (after) " << cl_float2_buf[i].x << " " << cl_float2_buf[i].y << endl;
+//  }
+//  cout << endl;
 
   if(inverse == false)
   {
     for(int i = 0; i < n; ++i)
     {
-      cl_float2_buf[i].x = cl_float2_buf[i].x / n;
-      cl_float2_buf[i].y = cl_float2_buf[i].y / n;
+      cl_float2_buf[i].s0 = cl_float2_buf[i].s0 / n;
+      cl_float2_buf[i].s1 = cl_float2_buf[i].s1 / n;
     }
   }
-
-  for(int i = 0; i < n; i++)
-  {
-    cout << "Index " << i << ": (after) " << cl_float2_buf[i].x << " " << cl_float2_buf[i].y << endl;
-  }
-  cout << endl;
 
 //  clReleaseEvent(start_event);
 //  clReleaseEvent(end_event);

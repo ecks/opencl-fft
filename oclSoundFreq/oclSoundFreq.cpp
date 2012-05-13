@@ -12,7 +12,7 @@
 
 using namespace std;
 
-const int samples_per_second = 2048;
+int samples_per_second = 1024;
 
 void opencl_init(int n, int argc, const char **argv);
 void compareValues(vector<FFT::Complex> cpu_transform_values, void * gpu_transform_values, int n);
@@ -45,8 +45,9 @@ char* cPathAndName = NULL;
 char* cSourceCL = NULL;
 char* program_log;
 
-int main(int argc, const char **argv)
-{ 
+int main(int argc, const char * argv[])
+{
+  samples_per_second = atoi(argv[1]); 
   FILE* f = fopen("pcm.pcm", "rb");
   fseek(f, 0, SEEK_END);
   int n = ftell(f) / 2;
@@ -75,7 +76,7 @@ int main(int argc, const char **argv)
   ciErr1 |= clSetKernelArg(ckKernel, 2, sizeof(cl_mem), (void*)&cmPointsPerGroup);
   ciErr1 |= clSetKernelArg(ckKernel, 3, sizeof(cl_mem), (void*)&cmDevDebug);
   ciErr1 |= clSetKernelArg(ckKernel, 4, sizeof(cl_mem), (void*)&cmDir);
-  shrLog("clSetKernelArg 0...4\n\n");
+//  shrLog("clSetKernelArg 0...4\n\n");
   if (ciErr1 != CL_SUCCESS)
   {
     shrLog("Error in clSetKernelArg, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -92,7 +93,7 @@ int main(int argc, const char **argv)
 //  szLocalWorkSize = szLocalWorkSize * 2;
 //  szGlobalWorkSize = szGlobalWorkSize * 2;
 
-  cout << "Points per group: " << points_per_group << " local memory size: " << l_mem_size << endl;
+//  cout << "Points per group: " << points_per_group << " local memory size: " << l_mem_size << endl;
 
   dft.transformGPU(buf_complex, cl_complex, cl_debug, cmDevComplex, 
                    cmPointsPerGroup, cmDevDebug, cmDir, ckKernel, szGlobalWorkSize, szLocalWorkSize, points_per_group,
@@ -111,9 +112,9 @@ void opencl_init(int n, int argc, const char **argv)
     // set logfile name and start logs
     shrSetLogFileName("oclFFT.txt");
     num_points = n;
-    shrLog("%s Starting...\n\n# of elements per Array \t= %i\n", argv[0], n);
+//    shrLog("%s Starting...\n\n# of elements per Array \t= %i\n", argv[0], n);
     
-    shrLog("Initializing data...\n");
+//    shrLog("Initializing data...\n");
     cl_complex = (void *)malloc(sizeof(cl_float2) * n);
 
     cl_debug = (void *)malloc(sizeof(cl_float2) * n);
@@ -121,7 +122,7 @@ void opencl_init(int n, int argc, const char **argv)
     //Get an OpenCL platform
     ciErr1 = clGetPlatformIDs(1, &cpPlatform, NULL);
     
-    shrLog("clGetPlatformID...\n"); 
+//    shrLog("clGetPlatformID...\n"); 
     if (ciErr1 != CL_SUCCESS)
     {   
       shrLog("Error in clGetPlatformID, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -130,7 +131,7 @@ void opencl_init(int n, int argc, const char **argv)
 
    //Get the devices
     ciErr1 = clGetDeviceIDs(cpPlatform, CL_DEVICE_TYPE_GPU, 1, &cdDevice, NULL);
-    shrLog("clGetDeviceIDs...\n"); 
+//    shrLog("clGetDeviceIDs...\n"); 
     if (ciErr1 != CL_SUCCESS)
     {   
       shrLog("Error in clGetDeviceIDs, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -139,7 +140,7 @@ void opencl_init(int n, int argc, const char **argv)
 
     //Create the context
     cxGPUContext = clCreateContext(0, 1, &cdDevice, NULL, NULL, &ciErr1);
-    shrLog("clCreateContext...\n"); 
+//    shrLog("clCreateContext...\n"); 
     if (ciErr1 != CL_SUCCESS)
     {   
       shrLog("Error in clCreateContext, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -148,7 +149,7 @@ void opencl_init(int n, int argc, const char **argv)
 
     // Create a command-queue
     cqCommandQueue = clCreateCommandQueue(cxGPUContext, cdDevice, 0, &ciErr1);
-    shrLog("clCreateCommandQueue...\n"); 
+//    shrLog("clCreateCommandQueue...\n"); 
     if (ciErr1 != CL_SUCCESS)
     {   
       shrLog("Error in clCreateCommandQueue, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -158,7 +159,7 @@ void opencl_init(int n, int argc, const char **argv)
     // Allocate the OpenCL buffer memory objects for source and result on the device GMEM
     cmDevComplex = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_float2) * n, NULL, &ciErr1);
 
-    shrLog("clCreateBuffer...\n");
+//    shrLog("clCreateBuffer...\n");
     if (ciErr1 != CL_SUCCESS)
     {
         shrLog("Error in clCreateBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -167,7 +168,7 @@ void opencl_init(int n, int argc, const char **argv)
 
     cmPointsPerGroup = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_uint), NULL, &ciErr1);
 
-    shrLog("clCreateBuffer...\n");
+//    shrLog("clCreateBuffer...\n");
     if (ciErr1 != CL_SUCCESS)
     {
         shrLog("Error in clCreateBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -177,7 +178,7 @@ void opencl_init(int n, int argc, const char **argv)
 
     cmDevDebug = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_float2) * n, NULL, &ciErr1);
 
-    shrLog("clCreateBuffer...\n");
+//    shrLog("clCreateBuffer...\n");
     if (ciErr1 != CL_SUCCESS)
     {
         shrLog("Error in clCreateBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -186,7 +187,7 @@ void opencl_init(int n, int argc, const char **argv)
 
     cmDir = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_int), NULL, &ciErr1);
 
-    shrLog("clCreateBuffer...\n");
+//    shrLog("clCreateBuffer...\n");
     if (ciErr1 != CL_SUCCESS)
     {
         shrLog("Error in clCreateBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -195,13 +196,13 @@ void opencl_init(int n, int argc, const char **argv)
 
 
      // Read the OpenCL kernel in from source file
-    shrLog("oclLoadProgSource (%s)...\n", cSourceFile);
+//    shrLog("oclLoadProgSource (%s)...\n", cSourceFile);
     cPathAndName = shrFindFilePath(cSourceFile, argv[0]);
     cSourceCL = oclLoadProgSource(cPathAndName, "", &szKernelLength);
     
     // Create the program
     cpProgram = clCreateProgramWithSource(cxGPUContext, 1, (const char **)&cSourceCL, &szKernelLength, &ciErr1);
-    shrLog("clCreateProgramWithSource...\n");
+//    shrLog("clCreateProgramWithSource...\n");
     if (ciErr1 != CL_SUCCESS)
     {
       shrLog("Error in clCreateProgramWithSource, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
@@ -215,7 +216,7 @@ void opencl_init(int n, int argc, const char **argv)
       char* flags = "-cl-fast-relaxed-math";
     #endif
     ciErr1 = clBuildProgram(cpProgram, 0, NULL, NULL, NULL, NULL);
-    shrLog("clBuildProgram...\n");
+//    shrLog("clBuildProgram...\n");
     if (ciErr1 != CL_SUCCESS)
     {
       clGetProgramBuildInfo(cpProgram, cdDevice, CL_PROGRAM_BUILD_LOG,
@@ -231,7 +232,7 @@ void opencl_init(int n, int argc, const char **argv)
     }
     // Create the kernel
     ckKernel = clCreateKernel(cpProgram, "FFT2", &ciErr1);
-    shrLog("clCreateKernel (FFT2)...\n");
+//    shrLog("clCreateKernel (FFT2)...\n");
     if (ciErr1 != CL_SUCCESS)
     {   
       shrLog("Error in clCreateKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);

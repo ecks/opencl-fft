@@ -34,7 +34,7 @@ __kernel void FFT2(__global float2 * a, __local float2 * l, __global const uint 
   int angle;
 
   // perform a 4-point FFT
-  // for(int i = 0; i < points_per_item; i+=4)
+  for(int i = 0; i < points_per_item; i+=4)
   {
     u = a[a_addr];
     s = a[a_addr+1];
@@ -57,12 +57,12 @@ __kernel void FFT2(__global float2 * a, __local float2 * l, __global const uint 
     a_addr += 4;
   }
 
-//  l_addr = get_local_id(0) * points_per_item;
-//  a_addr = get_group_id(0) * *points_per_group + l_addr;
+  l_addr = get_local_id(0) * points_per_item;
+  a_addr = get_group_id(0) * *points_per_group + l_addr;
 
 //  for(int i = 0; i < points_per_item; i++)
 //  {
-//    debug[a_addr + i] = get_local_id(0);
+//    debug[a_addr + i] = l[l_addr + i];
 //  }
 
   // perform all other points necessary. we start at
@@ -108,22 +108,22 @@ __kernel void FFT2(__global float2 * a, __local float2 * l, __global const uint 
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    l_addr = get_local_id(0) * points_per_item;
-    a_addr = get_group_id(0) * *points_per_group + l_addr;
+//    l_addr = get_local_id(0) * points_per_item;
+//    a_addr = get_group_id(0) * *points_per_group + l_addr;
 
-    if(s == (lgppg-1))
-    {
-      for(int i = 0; i < points_per_item; i++)
-      {
-        debug[a_addr + i] = l[a_addr + i];
-      }
-    }
+//    if(s == (lgppg-1))
+//    {
+//      for(int i = 0; i < points_per_item; i++)
+//      {
+//        debug[a_addr + i] = l[a_addr + i];
+//      }
+//    }
   }
 
   l_addr = get_local_id(0) * points_per_item;
   a_addr = get_group_id(0) * *points_per_group + l_addr;
   for(int i = 0; i < points_per_item; i++)
   {
-    a[a_addr + i] = l[a_addr + i];
+    a[a_addr + i] = l[l_addr + i];
   }
 }
