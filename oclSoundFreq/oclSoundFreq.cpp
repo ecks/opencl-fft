@@ -30,7 +30,9 @@ cl_platform_id cpPlatform;
 cl_device_id cdDevice;
 cl_program cpProgram;
 cl_kernel ckKernel;
+cl_kernel ckKernelAll;
 cl_mem cmDevComplex;
+cl_mem cmM;
 cl_mem cmPointsPerGroup;
 cl_mem cmDevDebug;
 cl_mem cmDir;
@@ -93,13 +95,23 @@ int main(int argc, const char * argv[])
 //  szLocalWorkSize = szLocalWorkSize * 2;
 //  szGlobalWorkSize = szGlobalWorkSize * 2;
 
-//  cout << "Points per group: " << points_per_group << " local memory size: " << l_mem_size << endl;
+  cout << "Points per group: " << points_per_group << " local memory size: " << l_mem_size << " Points per item: " << points_per_item << endl;
 
   dft.transformGPU(buf_complex, cl_complex, cl_debug, cmDevComplex, 
                    cmPointsPerGroup, cmDevDebug, cmDir, ckKernel, szGlobalWorkSize, szLocalWorkSize, points_per_group,
                    cqCommandQueue, ciErr1, argc, (const char **)argv);
   compareValues(frequencies, cl_complex, n);
  
+  ciErr1 = clSetKernelArg(ckKernelAll, 0, sizeof(cl_mem), (void*)&cmDevComplex);
+  ciErr1 |= clSetKernelArg(ckKernelAll, 1, sizeof(cl_mem), (void*)&cmM);
+  ciErr1 |= clSetKernelArg(ckKernelAll, 2, sizeof(cl_mem), (void*)&cmPointsPerGroup);
+  ciErr1 |= clSetKernelArg(ckKernelAll, 3, sizeof(cl_mem), (void*)&cmDir);
+
+  dft.transformAllGPU(buf_complex, cl_complex, cl_debug, cmDevComplex, cmM,
+                     cmPointsPerGroup, cmDevDebug, cmDir, ckKernel, ckKernelAll, szGlobalWorkSize, szLocalWorkSize, points_per_group,
+                     cqCommandQueue, ciErr1, argc, (const char **)argv);
+  compareValues(frequencies, cl_complex, n);
+
   for (int k = 0; k < (n >> 1); ++k)
     if (dft.getIntensity(frequencies[k]) > 100)
       cout << (k * samples_per_second / n) << " => "
@@ -165,6 +177,16 @@ void opencl_init(int n, int argc, const char **argv)
         shrLog("Error in clCreateBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
         Cleanup(argc, (char **)argv, EXIT_FAILURE);
     } 
+
+    cmM = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_uint), NULL, &ciErr1);
+
+//    shrLog("clCreateBuffer...\n");
+    if (ciErr1 != CL_SUCCESS)
+    {
+        shrLog("Error in clCreateBuffer, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+        Cleanup(argc, (char **)argv, EXIT_FAILURE);
+    } 
+
 
     cmPointsPerGroup = clCreateBuffer(cxGPUContext, CL_MEM_READ_WRITE, sizeof(cl_uint), NULL, &ciErr1);
 
@@ -238,6 +260,15 @@ void opencl_init(int n, int argc, const char **argv)
       shrLog("Error in clCreateKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
       Cleanup(argc, (char **)argv, EXIT_FAILURE);
     }
+
+   ckKernelAll = clCreateKernel(cpProgram, "FFT2_ALL_POINTS", &ciErr1);
+//    shrLog("clCreateKernel (FFT2)...\n");
+    if (ciErr1 != CL_SUCCESS)
+    {   
+      shrLog("Error in clCreateKernel, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
+      Cleanup(argc, (char **)argv, EXIT_FAILURE);
+    }
+
 }
 
 void compareValues(vector<FFT::Complex> cpu_transform_values, void * gpu_transform_values, int n)
